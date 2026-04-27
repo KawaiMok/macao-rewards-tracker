@@ -4,34 +4,44 @@ import com.macaorewards.api.dto.OutcomeInput;
 import com.macaorewards.api.dto.WeekendDrawSessionRequest;
 import com.macaorewards.api.dto.WeekendDrawSessionResponse;
 import com.macaorewards.domain.User;
+import com.macaorewards.domain.WalletConsumptionRecord;
 import com.macaorewards.domain.WeekendDrawOutcome;
 import com.macaorewards.domain.WeekendDrawSession;
 import com.macaorewards.domain.WalletProvider;
 import com.macaorewards.repo.UserRepository;
+import com.macaorewards.repo.WalletConsumptionRecordRepository;
 import com.macaorewards.repo.WeekendDrawSessionRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Instant;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
 public class WeekendDrawSessionService {
 
     private static final Set<Integer> ALLOWED_PRIZES = Set.of(10, 20, 50, 100, 200);
+    private static final String AUTO_CONSUME_NOTE_PREFIX = "AUTO_CONSUME_DENOM=";
+    private static final Pattern LEGACY_AUTO_CONSUME_PATTERN = Pattern.compile("^前端快速消耗\\s*(\\d+)\\s*券$");
 
     private final WeekendDrawSessionRepository sessions;
+    private final WalletConsumptionRecordRepository consumptions;
     private final UserRepository users;
     private final CampaignWeekService weeks;
 
     public WeekendDrawSessionService(
             WeekendDrawSessionRepository sessions,
+            WalletConsumptionRecordRepository consumptions,
             UserRepository users,
             CampaignWeekService weeks
     ) {
         this.sessions = sessions;
+        this.consumptions = consumptions;
         this.users = users;
         this.weeks = weeks;
     }
@@ -85,12 +95,73 @@ public class WeekendDrawSessionService {
 
     @Transactional
     public void delete(Long id, Long userId) {
-        WeekendDrawSession s = sessions.findById(id)
+        WeekendDrawSession s = sessions.findByIdAndUserIdWithOutcomes(id, userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
-        if (!s.getUser().getId().equals(userId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
-        }
+        rollbackAutoConsumptionForDeletedSession(s, userId);
         sessions.delete(s);
+    }
+
+    /**
+     * 刪除中獎記錄時，同步回滾由「點券消耗」自動建立的消費紀錄，避免重建後仍被舊消耗覆蓋。
+     */
+    private void rollbackAutoConsumptionForDeletedSession(WeekendDrawSession session, Long userId) {
+        Instant[] bounds = weeks.weekBoundsFor(session.getOccurredAt());
+        List<WalletConsumptionRecord> walletConsumptions = consumptions
+                .findByUserIdAndWalletAndOccurredAtGreaterThanEqualAndOccurredAtLessThanOrderByOccurredAtDesc(
+                        userId,
+                        session.getWallet(),
+                        bounds[0],
+                        bounds[1]
+                );
+
+        Map<Integer, Long> toRollbackByDenom = session.getOutcomes().stream()
+                .map(WeekendDrawOutcome::getPrizeMop)
+                .filter(Objects::nonNull)
+                .collect(Collectors.groupingBy(p -> p, Collectors.counting()));
+
+        if (toRollbackByDenom.isEmpty()) {
+            return;
+        }
+
+        for (WalletConsumptionRecord record : walletConsumptions) {
+            Integer explicitDenom = parseExplicitConsumedDenom(record.getNote());
+            if (explicitDenom == null) {
+                continue;
+            }
+            long remaining = toRollbackByDenom.getOrDefault(explicitDenom, 0L);
+            if (remaining <= 0) {
+                continue;
+            }
+            consumptions.delete(record);
+            if (remaining == 1) {
+                toRollbackByDenom.remove(explicitDenom);
+            } else {
+                toRollbackByDenom.put(explicitDenom, remaining - 1);
+            }
+            if (toRollbackByDenom.isEmpty()) {
+                return;
+            }
+        }
+    }
+
+    private Integer parseExplicitConsumedDenom(String note) {
+        if (note == null) {
+            return null;
+        }
+        if (note.startsWith(AUTO_CONSUME_NOTE_PREFIX)) {
+            try {
+                return Integer.parseInt(note.substring(AUTO_CONSUME_NOTE_PREFIX.length()).trim());
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        Matcher legacy = LEGACY_AUTO_CONSUME_PATTERN.matcher(note.trim());
+        if (!legacy.matches()) return null;
+        try {
+            return Integer.parseInt(legacy.group(1));
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private void validateOutcomes(List<OutcomeInput> outcomes) {

@@ -13,10 +13,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class SummaryService {
     private static final List<Integer> PRIZE_DENOMINATIONS = List.of(10, 20, 50, 100, 200);
+    private static final String AUTO_CONSUME_NOTE_PREFIX = "AUTO_CONSUME_DENOM=";
+    private static final Pattern LEGACY_AUTO_CONSUME_PATTERN = Pattern.compile("^前端快速消耗\\s*(\\d+)\\s*券$");
 
     private final WeekendDrawSessionRepository sessions;
     private final WalletConsumptionRecordRepository consumptions;
@@ -128,20 +132,45 @@ public class SummaryService {
                 }
             }
 
-            long consumedSpend = weekConsumptions.stream()
+            List<WalletConsumptionRecord> walletConsumptions = weekConsumptions.stream()
                     .filter(c -> c.getWallet() == wallet)
+                    .toList();
+            long consumedSpend = walletConsumptions.stream()
                     .map(c -> c.getAmount().longValue())
                     .reduce(0L, Long::sum);
 
-            // 註解：依面額由小至大估算可消耗券數，讓使用者知道各面額已消耗多少。
-            long spendBudget = consumedSpend;
+            // 先處理「點哪張就消耗哪張」的明確消耗紀錄。
+            Map<Integer, Long> explicitConsumed = new LinkedHashMap<>();
+            for (Integer denom : PRIZE_DENOMINATIONS) {
+                explicitConsumed.put(denom, 0L);
+            }
+            for (WalletConsumptionRecord c : walletConsumptions) {
+                Integer explicitDenom = parseExplicitConsumedDenom(c.getNote());
+                if (explicitDenom == null || !explicitConsumed.containsKey(explicitDenom)) {
+                    continue;
+                }
+                explicitConsumed.put(explicitDenom, explicitConsumed.get(explicitDenom) + 1);
+            }
             for (Integer denom : PRIZE_DENOMINATIONS) {
                 long won = counts.getOrDefault(denom, 0L);
+                long explicit = explicitConsumed.getOrDefault(denom, 0L);
+                consumedCoupons.put(denom, Math.min(won, explicit));
+            }
+
+            // 剩餘未標記消費，再依原規則（小面額優先）推算。
+            long explicitSpendUsed = PRIZE_DENOMINATIONS.stream()
+                    .mapToLong(denom -> consumedCoupons.getOrDefault(denom, 0L) * denom * 3L)
+                    .sum();
+            long spendBudget = Math.max(0L, consumedSpend - explicitSpendUsed);
+            for (Integer denom : PRIZE_DENOMINATIONS) {
+                long won = counts.getOrDefault(denom, 0L);
+                long alreadyConsumed = consumedCoupons.getOrDefault(denom, 0L);
+                long remainingCoupons = Math.max(0L, won - alreadyConsumed);
                 long spendPerCoupon = denom * 3L;
                 long affordable = spendPerCoupon > 0 ? spendBudget / spendPerCoupon : 0L;
-                long consumed = Math.min(won, affordable);
-                consumedCoupons.put(denom, consumed);
-                spendBudget -= consumed * spendPerCoupon;
+                long inferredConsumed = Math.min(remainingCoupons, affordable);
+                consumedCoupons.put(denom, alreadyConsumed + inferredConsumed);
+                spendBudget -= inferredConsumed * spendPerCoupon;
             }
 
             // 註解：需消費總額改為「尚未消耗券」的動態重算值。
@@ -172,5 +201,26 @@ public class SummaryService {
                 PRIZE_DENOMINATIONS,
                 rows
         );
+    }
+
+    private Integer parseExplicitConsumedDenom(String note) {
+        if (note == null) {
+            return null;
+        }
+        if (note.startsWith(AUTO_CONSUME_NOTE_PREFIX)) {
+            String raw = note.substring(AUTO_CONSUME_NOTE_PREFIX.length()).trim();
+            try {
+                return Integer.parseInt(raw);
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        Matcher legacy = LEGACY_AUTO_CONSUME_PATTERN.matcher(note.trim());
+        if (!legacy.matches()) return null;
+        try {
+            return Integer.parseInt(legacy.group(1));
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 }

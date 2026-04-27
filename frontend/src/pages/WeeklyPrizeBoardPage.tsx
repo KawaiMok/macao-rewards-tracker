@@ -136,19 +136,15 @@ export function WeeklyPrizeBoardPage() {
         wallet: walletId,
         occurredAt: new Date().toISOString(),
         amount: denom * 3,
-        note: `前端快速消耗 ${denom} 券`,
+        // 後端會依此標記做精準扣券：點哪張就消耗哪張。
+        note: `AUTO_CONSUME_DENOM=${denom}`,
       });
-      // 若該面額有「剛新增保留未消耗」配額，手動消耗後先扣掉 1。
+      // 一旦手動點擊該面額，就取消此面額的「剛新增保留未消耗」保護，避免灰階延遲一拍。
       setNewlyAddedUnconsumed((prev) => {
         const keyOfCoupon = `${walletId}-${denom}`;
-        const current = prev[keyOfCoupon] ?? 0;
-        if (current <= 0) return prev;
+        if (!(keyOfCoupon in prev)) return prev;
         const next = { ...prev };
-        if (current === 1) {
-          delete next[keyOfCoupon];
-        } else {
-          next[keyOfCoupon] = current - 1;
-        }
+        delete next[keyOfCoupon];
         return next;
       });
       await load();
