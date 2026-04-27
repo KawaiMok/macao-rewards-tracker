@@ -1,0 +1,16 @@
+# Local environment files
+frontend/.env.development
+frontend/.env.local
+frontend/.env.*.local
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+.cursor/
+
+# Build artifacts
+frontend/node_modules/
+frontend/dist/
+backend/target/
+backend/data/
