@@ -24,6 +24,8 @@ app:
   jwt:
     secret: ${JWT_SECRET:macao-rewards-dev-secret-change-in-production-min-256-bits-please-use-long-random-string}
     expiration-ms: 86400000
+  google:
+    client-id: ${APP_GOOGLE_CLIENT_ID:}
   cors:
     # 開發環境預設：允許 localhost / 127.0.0.1 任意埠（避免 Vite 自動換埠後 CORS 卡住）
     allowed-origins: ""

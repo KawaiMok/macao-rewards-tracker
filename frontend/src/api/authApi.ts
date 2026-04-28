@@ -18,6 +18,15 @@ export async function login(username: string, password: string) {
   return r;
 }
 
+export async function loginWithGoogle(idToken: string) {
+  const r = await api<{ token: string; username: string }>('/api/auth/google', {
+    method: 'POST',
+    body: JSON.stringify({ idToken }),
+  });
+  setSession(r.token, r.username);
+  return r;
+}
+
 export function logout() {
   clearSession();
 }

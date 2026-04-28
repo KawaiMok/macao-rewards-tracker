@@ -16,6 +16,7 @@ interface AuthState {
 
 interface AuthContextValue extends AuthState {
   login: (u: string, p: string) => Promise<void>;
+  loginWithGoogle: (idToken: string) => Promise<void>;
   register: (u: string, p: string) => Promise<void>;
   logout: () => void;
 }
@@ -28,6 +29,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (u: string, p: string) => {
     const r = await authApi.login(u, p);
+    setUsername(r.username);
+    setToken(r.token);
+  }, []);
+
+  const loginWithGoogle = useCallback(async (idToken: string) => {
+    const r = await authApi.loginWithGoogle(idToken);
     setUsername(r.username);
     setToken(r.token);
   }, []);
@@ -45,8 +52,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ username, token, login, register, logout }),
-    [username, token, login, register, logout]
+    () => ({ username, token, login, loginWithGoogle, register, logout }),
+    [username, token, login, loginWithGoogle, register, logout]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
