@@ -1,6 +1,7 @@
 spring:
   datasource:
-    url: jdbc:h2:file:./data/macao-rewards;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE
+    # 本機單機模式即可；AUTO_SERVER 會啟用額外 socket 連線，某些環境下可能被限制而導致啟動失敗
+    url: jdbc:h2:file:./data/macao-rewards;DB_CLOSE_DELAY=-1
     driver-class-name: org.h2.Driver
     username: sa
     password:
@@ -24,7 +25,10 @@ app:
     secret: ${JWT_SECRET:macao-rewards-dev-secret-change-in-production-min-256-bits-please-use-long-random-string}
     expiration-ms: 86400000
   cors:
-    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
+    # 開發環境預設：允許 localhost / 127.0.0.1 任意埠（避免 Vite 自動換埠後 CORS 卡住）
+    allowed-origins: ""
+    # 另外也允許常見私網 IP（你用 Vite 的 Network URL 開頁面時會用到）
+    allowed-origin-patterns: ${APP_CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*,http://10.*.*.*:*,http://192.168.*.*:*,http://172.16.*.*:*}
   campaign:
     year: 2026
     # 活動起日（含）：用於計算 weekNumber

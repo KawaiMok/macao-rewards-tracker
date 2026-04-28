@@ -26,13 +26,16 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final String allowedOrigins;
+    private final String allowedOriginPatterns;
 
     public SecurityConfig(
             JwtAuthenticationFilter jwtAuthenticationFilter,
-            @Value("${app.cors.allowed-origins:http://localhost:5173,http://127.0.0.1:5173}") String allowedOrigins
+            @Value("${app.cors.allowed-origins:}") String allowedOrigins,
+            @Value("${app.cors.allowed-origin-patterns:http://localhost:*,http://127.0.0.1:*,http://10.*.*.*:*,http://192.168.*.*:*,http://172.16.*.*:*}") String allowedOriginPatterns
     ) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.allowedOrigins = allowedOrigins;
+        this.allowedOriginPatterns = allowedOriginPatterns;
     }
 
     @Bean
@@ -56,10 +59,21 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration c = new CorsConfiguration();
-        c.setAllowedOrigins(Arrays.stream(allowedOrigins.split(","))
+        var origins = Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
-                .toList());
+                .toList();
+        var patterns = Arrays.stream(allowedOriginPatterns.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
+        // 正式環境：用 allowed-origins（精準網域）；開發環境：用 allowed-origin-patterns（支援 localhost:*）
+        if (!origins.isEmpty()) {
+            c.setAllowedOrigins(origins);
+        }
+        if (!patterns.isEmpty()) {
+            c.setAllowedOriginPatterns(patterns);
+        }
         c.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         c.setAllowedHeaders(List.of("*"));
         c.setAllowCredentials(true);

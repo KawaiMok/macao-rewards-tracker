@@ -64,11 +64,14 @@ Redeploy and note frontend URL:
 
 Backend CORS now reads from:
 
-- `APP_CORS_ALLOWED_ORIGINS` (comma-separated list)
+- `APP_CORS_ALLOWED_ORIGINS` (comma-separated **exact origins** for production)
+- Optional: `APP_CORS_ALLOWED_ORIGIN_PATTERNS` (comma-separated **patterns**, usually for local dev only)
 
-Example:
+Example (production):
 
 `APP_CORS_ALLOWED_ORIGINS=https://my-app.vercel.app,https://my-custom-domain.com`
+
+Local dev default already allows `http://localhost:*` / `http://127.0.0.1:*` so Vite changing ports won't break login.
 
 ## 6) Verify checklist
 

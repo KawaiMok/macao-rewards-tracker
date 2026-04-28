@@ -17,7 +17,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchWeeklyPrizeBoard } from '../api/summaryApi';
 import { createWeekendSession } from '../api/weekendApi';
-import { createConsumptionRecord } from '../api/consumptionApi';
+import { createConsumptionRecord, undoExplicitConsume } from '../api/consumptionApi';
 import type { WalletId, WeeklyPrizeBoardResponse } from '../api/types';
 import { ApiError } from '../api/client';
 import { WalletDisplay } from '../components/WalletDisplay';
@@ -54,9 +54,12 @@ export function WeeklyPrizeBoardPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [consumingKeys, setConsumingKeys] = useState<Record<string, boolean>>({});
+  const [undoingKeys, setUndoingKeys] = useState<Record<string, boolean>>({});
   const [newlyAddedUnconsumed, setNewlyAddedUnconsumed] = useState<Record<string, number>>({});
   const [planDialogOpen, setPlanDialogOpen] = useState(false);
   const [planAmountInput, setPlanAmountInput] = useState('');
+  const [undoDialogOpen, setUndoDialogOpen] = useState(false);
+  const [undoTarget, setUndoTarget] = useState<{ walletId: WalletId; denom: number } | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetchWeeklyPrizeBoard();
@@ -152,6 +155,32 @@ export function WeeklyPrizeBoardPage() {
       setError(e instanceof ApiError ? e.message : '標記消耗失敗');
     } finally {
       setConsumingKeys((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
+  }
+
+  function openUndoDialog(walletId: WalletId, denom: number) {
+    setUndoTarget({ walletId, denom });
+    setUndoDialogOpen(true);
+  }
+
+  async function confirmUndoConsume() {
+    if (!undoTarget) return;
+    const { walletId, denom } = undoTarget;
+    const key = `${walletId}-${denom}-${Date.now()}`;
+    setUndoingKeys((prev) => ({ ...prev, [key]: true }));
+    try {
+      await undoExplicitConsume(walletId, denom);
+      await load();
+      setUndoDialogOpen(false);
+      setUndoTarget(null);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : '復原未消耗失敗');
+    } finally {
+      setUndoingKeys((prev) => {
         const next = { ...prev };
         delete next[key];
         return next;
@@ -322,7 +351,7 @@ export function WeeklyPrizeBoardPage() {
               </Box>
               <Box sx={{ mt: 1.5 }}>
                 <Typography variant="caption" color="text.secondary">
-                  點擊未消耗獎券可標記消耗
+                  點擊未消耗獎券可標記消耗；灰色（已消耗）可點擊復原為未消耗
                 </Typography>
                 <Box sx={{ mt: 0.5, display: 'flex', gap: 0.75, overflowX: 'auto', pb: 0.5, justifyContent: 'center' }}>
                   {data.prizeDenominations.flatMap((d) => {
@@ -332,7 +361,7 @@ export function WeeklyPrizeBoardPage() {
                     const effectiveConsumed = Math.max(0, consumed - reservedAsUnconsumed);
                     return Array.from({ length: won }).map((_, idx) => {
                       const isConsumed = idx < effectiveConsumed;
-                      const loading = Object.values(consumingKeys).some(Boolean);
+                      const loading = Object.values(consumingKeys).some(Boolean) || Object.values(undoingKeys).some(Boolean);
                       return (
                         <Chip
                           key={`${row.walletId}-${d}-${idx}`}
@@ -357,9 +386,15 @@ export function WeeklyPrizeBoardPage() {
                             </Box>
                           }
                           size="small"
-                          onClick={isConsumed || loading ? undefined : () => consumeCoupon(row.walletId, d)}
+                          onClick={
+                            loading
+                              ? undefined
+                              : isConsumed
+                                ? () => openUndoDialog(row.walletId, d)
+                                : () => consumeCoupon(row.walletId, d)
+                          }
                           sx={{
-                            cursor: isConsumed ? 'default' : 'pointer',
+                            cursor: loading ? 'default' : 'pointer',
                             bgcolor: isConsumed ? 'rgba(140,140,140,0.5)' : 'rgba(131,171,255,0.2)',
                             color: isConsumed ? 'rgba(220,220,220,0.8)' : 'inherit',
                             textDecoration: isConsumed ? 'line-through' : 'none',
@@ -468,6 +503,38 @@ export function WeeklyPrizeBoardPage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setPlanDialogOpen(false)}>關閉</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={undoDialogOpen}
+        onClose={() => {
+          setUndoDialogOpen(false);
+          setUndoTarget(null);
+        }}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle>復原為未消耗</DialogTitle>
+        <DialogContent>
+          <Typography color="text.secondary" sx={{ mt: 1 }}>
+            {undoTarget
+              ? `確定要把 ${undoTarget.denom} 券改回「未消耗」嗎？（將撤銷本週最新一筆同面額的手動消耗標記）`
+              : '確定要復原為未消耗嗎？'}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setUndoDialogOpen(false);
+              setUndoTarget(null);
+            }}
+          >
+            取消
+          </Button>
+          <Button variant="contained" onClick={confirmUndoConsume}>
+            確定復原
+          </Button>
         </DialogActions>
       </Dialog>
 

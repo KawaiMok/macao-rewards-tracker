@@ -11,3 +11,10 @@ export function createConsumptionRecord(body: ConsumptionRecordPayload) {
 export function listCurrentWeekConsumptions(wallet: WalletId) {
   return api<ConsumptionRecordRow[]>(`/api/consumptions/current-week?wallet=${wallet}`);
 }
+
+export function undoExplicitConsume(wallet: WalletId, denom: number) {
+  return api<void>('/api/consumptions/undo-explicit', {
+    method: 'POST',
+    body: JSON.stringify({ wallet, denom }),
+  });
+}

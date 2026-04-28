@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 public interface WalletConsumptionRecordRepository extends JpaRepository<WalletConsumptionRecord, Long> {
 
@@ -15,5 +16,9 @@ public interface WalletConsumptionRecordRepository extends JpaRepository<WalletC
 
     List<WalletConsumptionRecord> findByUserIdAndWalletAndOccurredAtGreaterThanEqualAndOccurredAtLessThanOrderByOccurredAtDesc(
             Long userId, WalletProvider wallet, Instant fromInclusive, Instant toExclusive
+    );
+
+    Optional<WalletConsumptionRecord> findFirstByUserIdAndWalletAndOccurredAtGreaterThanEqualAndOccurredAtLessThanAndNoteOrderByOccurredAtDesc(
+            Long userId, WalletProvider wallet, Instant fromInclusive, Instant toExclusive, String note
     );
 }
