@@ -17,6 +17,8 @@ import { useAuth } from '../context/AuthContext';
 export function LoginPage() {
   const { login, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
+  const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim();
+  const googleLoginEnabled = Boolean(googleClientId);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -67,34 +69,42 @@ export function LoginPage() {
               {loading ? '登入中…' : '登入'}
             </Button>
 
-            <Box sx={{ display: 'flex', justifyContent: 'center' }}>
-              <GoogleLogin
-                useOneTap={false}
-                width="320"
-                onSuccess={async (cred) => {
-                  if (!cred.credential) {
-                    setError('Google 登入失敗（未取得 credential）');
-                    return;
-                  }
-                  setError(null);
-                  setGoogleLoading(true);
-                  try {
-                    await loginWithGoogle(cred.credential);
-                    navigate('/');
-                  } catch (err) {
-                    setError(err instanceof ApiError ? err.message : 'Google 登入失敗');
-                  } finally {
-                    setGoogleLoading(false);
-                  }
-                }}
-                onError={() => setError('Google 登入失敗')}
-              />
-            </Box>
-            {googleLoading && (
-              <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
-                正在完成 Google 登入…
-              </Typography>
-            )}
+            {/* 臨時偵錯：固定顯示目前前端讀到的 Google Client ID 狀態 */}
+          
+
+              <>
+                <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+                  <GoogleLogin
+                    useOneTap={false}
+                    width="320"
+                    onSuccess={async (cred) => {
+                      if (!cred.credential) {
+                        setError('Google 登入失敗（未取得 credential）');
+                        return;
+                      }
+                      setError(null);
+                      setGoogleLoading(true);
+                      try {
+                        await loginWithGoogle(cred.credential);
+                        navigate('/');
+                      } catch (err) {
+                        setError(err instanceof ApiError ? err.message : 'Google 登入失敗');
+                      } finally {
+                        setGoogleLoading(false);
+                      }
+                    }}
+                    onError={() => setError('Google 登入失敗')}
+                  />
+                </Box>
+                {googleLoading && (
+                  <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
+                    正在完成 Google 登入…
+                  </Typography>
+                )}
+              </>
+            
+            
+            
 
             <Typography variant="body2">
               還沒有帳號？{' '}
