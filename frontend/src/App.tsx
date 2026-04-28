@@ -14,6 +14,16 @@ const theme = createTheme({
     primary: { main: '#0d47a1' },
     secondary: { main: '#c62828' },
   },
+  components: {
+    MuiDialogTitle: {
+      styleOverrides: {
+        // 避免被全域 h2 樣式覆蓋，確保 Popup 標題在各瀏覽器皆可讀。
+        root: {
+          color: '#111827',
+        },
+      },
+    },
+  },
 });
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
