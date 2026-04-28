@@ -227,7 +227,10 @@ export function WeekendSessionsPage() {
           </Card>
         ) : (
           filtered.map((r) => {
-            const o = [...r.outcomes].sort((a, b) => a.drawIndex - b.drawIndex);
+            const prizes = [...r.outcomes]
+              .sort((a, b) => a.drawIndex - b.drawIndex)
+              .map((draw) => draw?.prizeMop ?? null)
+              .filter((prize): prize is number => prize != null);
             return (
               <Card
                 key={r.id}
@@ -245,10 +248,12 @@ export function WeekendSessionsPage() {
                     {new Date(r.occurredAt).toLocaleString()}
                   </Typography>
                   <Box sx={{ mt: 1, display: 'flex', gap: 0.75, overflowX: 'auto', pb: 0.5, justifyContent: 'center' }}>
-                    {o.map((draw, idx) => {
-                      const prize = draw?.prizeMop ?? null;
-                      const isEmpty = prize == null;
-                      return (
+                    {prizes.length === 0 ? (
+                      <Typography variant="body2" color="text.secondary">
+                        無中獎
+                      </Typography>
+                    ) : (
+                      prizes.map((prize, idx) => (
                         <Chip
                           key={`${r.id}-${idx}`}
                           label={
@@ -263,20 +268,17 @@ export function WeekendSessionsPage() {
                                   justifyContent: 'center',
                                   fontSize: 12,
                                   fontWeight: 700,
-                                  bgcolor: isEmpty ? 'rgba(120,120,120,0.55)' : 'rgba(76,120,220,0.24)',
+                                  bgcolor: 'rgba(76,120,220,0.24)',
                                 }}
                               >
                                 $
                               </Box>
-                              <span style={{ fontSize: 18, fontWeight: 800, lineHeight: 1 }}>
-                                {isEmpty ? '—' : prize}
-                              </span>
+                              <span style={{ fontSize: 18, fontWeight: 800, lineHeight: 1 }}>{prize}</span>
                             </Box>
                           }
                           size="small"
                           sx={{
-                            bgcolor: isEmpty ? 'rgba(140,140,140,0.5)' : 'rgba(131,171,255,0.2)',
-                            color: isEmpty ? 'rgba(220,220,220,0.8)' : 'inherit',
+                            bgcolor: 'rgba(131,171,255,0.2)',
                             flexShrink: 0,
                             height: 40,
                             '& .MuiChip-label': {
@@ -287,8 +289,8 @@ export function WeekendSessionsPage() {
                             },
                           }}
                         />
-                      );
-                    })}
+                      ))
+                    )}
                   </Box>
                   <Box sx={{ mt: 1, display: 'flex', justifyContent: 'center' }}>
                     <Button
