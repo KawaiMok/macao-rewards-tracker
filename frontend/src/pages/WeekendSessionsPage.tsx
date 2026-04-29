@@ -63,6 +63,7 @@ export function WeekendSessionsPage() {
   const [p2, setP2] = useState('');
   const [p3, setP3] = useState('');
   const [selectedPrizes, setSelectedPrizes] = useState<number[]>([]);
+  const [showScrollHint, setShowScrollHint] = useState(false);
 
   const load = useCallback(async () => {
     const list = await listWeekendSessions();
@@ -125,7 +126,7 @@ export function WeekendSessionsPage() {
     setOccurredLocal(isoToDatetimeLocalValue(new Date().toISOString()));
   }
 
-  async function handleSave() {
+  async function handleSave(prizesOverride?: number[]) {
     if (!wallet) {
       setError('請選擇錢包');
       return;
@@ -146,19 +147,16 @@ export function WeekendSessionsPage() {
         };
         await updateWeekendSession(editingId, body);
       } else {
-        if (selectedPrizes.length === 0) {
-          setError('請至少選擇 1 張獎券');
-          return;
-        }
+        const prizes = prizesOverride ?? selectedPrizes;
         await createWeekendSession({
           occurredAt: datetimeLocalToIso(occurredLocal),
           wallet: wallet as WalletId,
           spendAmount: null,
           merchantName: null,
           outcomes: [
-            { drawIndex: 1, prizeMop: selectedPrizes[0] ?? null },
-            { drawIndex: 2, prizeMop: selectedPrizes[1] ?? null },
-            { drawIndex: 3, prizeMop: selectedPrizes[2] ?? null },
+            { drawIndex: 1, prizeMop: prizes[0] ?? null },
+            { drawIndex: 2, prizeMop: prizes[1] ?? null },
+            { drawIndex: 3, prizeMop: prizes[2] ?? null },
           ],
         });
       }
@@ -189,6 +187,22 @@ export function WeekendSessionsPage() {
   const selectedWeekRows = rows.filter((r) => r.weekNumber === selectedWeek);
   // 指定週次下可新增的錢包：尚未出現在該週紀錄中的錢包。
   const selectableWallets = wallets.filter((w) => !selectedWeekRows.some((r) => r.wallet === w.id));
+
+  useEffect(() => {
+    const updateScrollHint = () => {
+      // 當頁面底部仍有未顯示卡片時，顯示向下提示；滑到底後自動隱藏。
+      const doc = document.documentElement;
+      const remain = doc.scrollHeight - (window.scrollY + window.innerHeight);
+      setShowScrollHint(remain > 80);
+    };
+    updateScrollHint();
+    window.addEventListener('scroll', updateScrollHint, { passive: true });
+    window.addEventListener('resize', updateScrollHint);
+    return () => {
+      window.removeEventListener('scroll', updateScrollHint);
+      window.removeEventListener('resize', updateScrollHint);
+    };
+  }, [filtered.length]);
 
   return (
     <Box
@@ -227,10 +241,9 @@ export function WeekendSessionsPage() {
           </Card>
         ) : (
           filtered.map((r) => {
-            const prizes = [...r.outcomes]
+            const draws = [...r.outcomes]
               .sort((a, b) => a.drawIndex - b.drawIndex)
-              .map((draw) => draw?.prizeMop ?? null)
-              .filter((prize): prize is number => prize != null);
+              .map((draw) => draw?.prizeMop ?? null);
             return (
               <Card
                 key={r.id}
@@ -248,12 +261,9 @@ export function WeekendSessionsPage() {
                     {new Date(r.occurredAt).toLocaleString()}
                   </Typography>
                   <Box sx={{ mt: 1, display: 'flex', gap: 0.75, overflowX: 'auto', pb: 0.5, justifyContent: 'center' }}>
-                    {prizes.length === 0 ? (
-                      <Typography variant="body2" color="text.secondary">
-                        無中獎
-                      </Typography>
-                    ) : (
-                      prizes.map((prize, idx) => (
+                    {draws.map((prize, idx) => {
+                      const isMiss = prize == null;
+                      return (
                         <Chip
                           key={`${r.id}-${idx}`}
                           label={
@@ -268,17 +278,19 @@ export function WeekendSessionsPage() {
                                   justifyContent: 'center',
                                   fontSize: 12,
                                   fontWeight: 700,
-                                  bgcolor: 'rgba(76,120,220,0.24)',
+                                  bgcolor: isMiss ? 'rgba(120,120,120,0.2)' : 'rgba(76,120,220,0.24)',
                                 }}
                               >
                                 $
                               </Box>
-                              <span style={{ fontSize: 18, fontWeight: 800, lineHeight: 1 }}>{prize}</span>
+                              <span style={{ fontSize: 18, fontWeight: 800, lineHeight: 1 }}>
+                                {isMiss ? '未中' : prize}
+                              </span>
                             </Box>
                           }
                           size="small"
                           sx={{
-                            bgcolor: 'rgba(131,171,255,0.2)',
+                            bgcolor: isMiss ? 'rgba(120,120,120,0.12)' : 'rgba(131,171,255,0.2)',
                             flexShrink: 0,
                             height: 40,
                             '& .MuiChip-label': {
@@ -289,8 +301,8 @@ export function WeekendSessionsPage() {
                             },
                           }}
                         />
-                      ))
-                    )}
+                      );
+                    })}
                   </Box>
                   <Box sx={{ mt: 1, display: 'flex', justifyContent: 'center' }}>
                     <Button
@@ -344,6 +356,33 @@ export function WeekendSessionsPage() {
       >
         ＋ 新增中獎
       </Fab>
+
+      {showScrollHint && !dialogOpen && !walletPickerOpen && (
+        <Box
+          sx={{
+            position: 'fixed',
+            left: '50%',
+            bottom: { xs: 16, sm: 18 },
+            transform: 'translateX(-50%)',
+            zIndex: 1200,
+            px: 1.25,
+            py: 0.35,
+            borderRadius: 999,
+            bgcolor: 'rgba(17,24,39,0.72)',
+            color: '#fff',
+            fontSize: 12,
+            lineHeight: 1,
+            pointerEvents: 'none',
+            '@keyframes scrollHintBounce': {
+              '0%, 100%': { transform: 'translateX(-50%) translateY(0)' },
+              '50%': { transform: 'translateX(-50%) translateY(-5px)' },
+            },
+            animation: 'scrollHintBounce 1.2s ease-in-out infinite',
+          }}
+        >
+          往下還有卡片
+        </Box>
+      )}
 
       <Dialog open={walletPickerOpen} onClose={() => setWalletPickerOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>選擇本週可新增的支付工具</DialogTitle>
@@ -475,7 +514,7 @@ export function WeekendSessionsPage() {
                 <Box>
                   <Typography variant="subtitle2">最多 3 次獎券選擇</Typography>
                   <Typography variant="caption" color="text.secondary">
-                    已選 {selectedPrizes.length} / 3（可留空代表未中）
+                    已選 {selectedPrizes.length} / 3（可全部留空，代表三次皆未中）
                   </Typography>
                 </Box>
                 <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 1 }}>
@@ -508,7 +547,12 @@ export function WeekendSessionsPage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)}>取消</Button>
-          <Button variant="contained" onClick={handleSave} disabled={editingId == null && selectedPrizes.length === 0}>
+          {editingId == null && (
+            <Button variant="outlined" onClick={() => handleSave([])}>
+              沒有中獎
+            </Button>
+          )}
+          <Button variant="contained" onClick={() => handleSave()}>
             儲存
           </Button>
         </DialogActions>

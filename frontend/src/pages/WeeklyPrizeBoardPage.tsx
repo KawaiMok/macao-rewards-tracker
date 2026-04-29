@@ -1,5 +1,6 @@
 import {
   Alert,
+  Badge,
   Box,
   Button,
   Card,
@@ -16,7 +17,7 @@ import {
 } from '@mui/material';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchWeeklyPrizeBoard } from '../api/summaryApi';
-import { createWeekendSession } from '../api/weekendApi';
+import { createWeekendSession, listWeekendSessions } from '../api/weekendApi';
 import { createConsumptionRecord, undoExplicitConsume } from '../api/consumptionApi';
 import type { WalletId, WeeklyPrizeBoardResponse } from '../api/types';
 import { ApiError } from '../api/client';
@@ -46,6 +47,7 @@ const IOS_FAB_SX = {
 
 export function WeeklyPrizeBoardPage() {
   const [data, setData] = useState<WeeklyPrizeBoardResponse | null>(null);
+  const [allSessions, setAllSessions] = useState<Awaited<ReturnType<typeof listWeekendSessions>>>([]);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [walletPickerOpen, setWalletPickerOpen] = useState(false);
@@ -60,18 +62,29 @@ export function WeeklyPrizeBoardPage() {
   const [planAmountInput, setPlanAmountInput] = useState('');
   const [undoDialogOpen, setUndoDialogOpen] = useState(false);
   const [undoTarget, setUndoTarget] = useState<{ walletId: WalletId; denom: number } | null>(null);
+  const [showScrollHint, setShowScrollHint] = useState(false);
 
   const load = useCallback(async () => {
-    const res = await fetchWeeklyPrizeBoard();
+    const [res, sessions] = await Promise.all([
+      fetchWeeklyPrizeBoard(),
+      listWeekendSessions(),
+    ]);
     setData(res);
+    setAllSessions(sessions);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetchWeeklyPrizeBoard();
-        if (!cancelled) setData(res);
+        const [res, sessions] = await Promise.all([
+          fetchWeeklyPrizeBoard(),
+          listWeekendSessions(),
+        ]);
+        if (!cancelled) {
+          setData(res);
+          setAllSessions(sessions);
+        }
       } catch (e) {
         if (!cancelled) setError(e instanceof ApiError ? e.message : '載入失敗');
       }
@@ -88,16 +101,13 @@ export function WeeklyPrizeBoardPage() {
     setDialogOpen(true);
   }
 
-  async function handleSave() {
+  async function handleSave(prizesOverride?: number[]) {
     if (!targetWallet) return;
-    if (selectedPrizes.length === 0) {
-      setSaveError('請至少選擇 1 張獎券');
-      return;
-    }
+    const prizes = prizesOverride ?? selectedPrizes;
     setSaving(true);
     setSaveError(null);
     try {
-      const addedCounts = selectedPrizes.reduce<Record<string, number>>((acc, prize) => {
+      const addedCounts = prizes.reduce<Record<string, number>>((acc, prize) => {
         const key = `${targetWallet}-${prize}`;
         acc[key] = (acc[key] ?? 0) + 1;
         return acc;
@@ -108,9 +118,9 @@ export function WeeklyPrizeBoardPage() {
         spendAmount: null,
         merchantName: null,
         outcomes: [
-          { drawIndex: 1, prizeMop: selectedPrizes[0] ?? null },
-          { drawIndex: 2, prizeMop: selectedPrizes[1] ?? null },
-          { drawIndex: 3, prizeMop: selectedPrizes[2] ?? null },
+          { drawIndex: 1, prizeMop: prizes[0] ?? null },
+          { drawIndex: 2, prizeMop: prizes[1] ?? null },
+          { drawIndex: 3, prizeMop: prizes[2] ?? null },
         ],
       });
       // 剛新增的券先保留為「未消耗」視覺狀態，避免被既有消費金額立即抵扣成灰色。
@@ -196,6 +206,25 @@ export function WeeklyPrizeBoardPage() {
     Object.values(row.prizeCountByMop).every((count) => count === 0),
   );
   const selectedPrizeTimes = selectedPrizes.length;
+  const noPrizeRecordedWalletIds = useMemo(() => {
+    if (!data) return new Set<WalletId>();
+    const weekStart = Date.parse(data.weekStartInclusive);
+    const weekEnd = Date.parse(data.weekEndExclusive);
+    const ids = allSessions
+      .filter((session) => {
+        const occurredTs = Date.parse(session.occurredAt);
+        return occurredTs >= weekStart && occurredTs < weekEnd;
+      })
+      .filter((session) => session.outcomes.every((outcome) => outcome.prizeMop == null))
+      .map((session) => session.wallet as WalletId);
+    return new Set(ids);
+  }, [allSessions, data]);
+  const rowsWithRecordedNoPrize = rowsWithoutRecord.filter((row) =>
+    noPrizeRecordedWalletIds.has(row.walletId),
+  );
+  const rowsWithoutRecordCanAdd = rowsWithoutRecord.filter((row) =>
+    !noPrizeRecordedWalletIds.has(row.walletId),
+  );
   const planAmount = Number(planAmountInput);
   const hasPlanAmount = Number.isFinite(planAmount) && planAmount > 0;
   const planScenarios = useMemo(() => {
@@ -290,6 +319,22 @@ export function WeeklyPrizeBoardPage() {
       a.remainingBudget - b.remainingBudget || b.totalSuggestedCoupons - a.totalSuggestedCoupons,
     );
   }, [data, hasPlanAmount, newlyAddedUnconsumed, planAmount, rowsWithPrize]);
+
+  useEffect(() => {
+    const updateScrollHint = () => {
+      // 當頁面底部仍有未顯示卡片時，顯示向下提示；滑到底後自動隱藏。
+      const doc = document.documentElement;
+      const remain = doc.scrollHeight - (window.scrollY + window.innerHeight);
+      setShowScrollHint(remain > 80);
+    };
+    updateScrollHint();
+    window.addEventListener('scroll', updateScrollHint, { passive: true });
+    window.addEventListener('resize', updateScrollHint);
+    return () => {
+      window.removeEventListener('scroll', updateScrollHint);
+      window.removeEventListener('resize', updateScrollHint);
+    };
+  }, [rowsWithPrize.length, rowsWithRecordedNoPrize.length]);
 
   if (error) {
     return <Typography color="error">{error}</Typography>;
@@ -416,6 +461,26 @@ export function WeeklyPrizeBoardPage() {
             </CardContent>
           </Card>
         ))}
+        {rowsWithRecordedNoPrize.map((row) => (
+          <Card
+            key={`no-prize-${row.walletId}`}
+            variant="outlined"
+            sx={{
+              boxShadow: '0 3px 10px rgba(0,0,0,0.08)',
+            }}
+          >
+            <CardContent sx={{ py: '8px !important', px: 1.5 }}>
+              <WalletDisplay walletId={row.walletId} displayName={row.walletDisplayName} />
+              <Box sx={{ mt: 1 }}>
+                {/* 只有使用者真的新增「未中」紀錄，才顯示此卡片。 */}
+                <Typography variant="body1" color="text.secondary">
+                  本週未中獎
+                </Typography>
+                
+              </Box>
+            </CardContent>
+          </Card>
+        ))}
       </Box>
 
       <Fab
@@ -437,21 +502,70 @@ export function WeeklyPrizeBoardPage() {
         消費計劃
       </Fab>
 
-      <Fab
-        variant="extended"
-        color="primary"
-        aria-label="新增中獎"
-        onClick={() => setWalletPickerOpen(true)}
+      <Badge
+        color="error"
+        variant="dot"
+        overlap="circular"
+        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+        invisible={rowsWithoutRecordCanAdd.length === 0}
         sx={{
           position: 'fixed',
           right: { xs: 12, sm: 30 },
           bottom: { xs: 120, sm: 296 },
           zIndex: 1300,
-          ...IOS_FAB_SX,
+          '& .MuiBadge-badge': {
+            // 尚有抽獎機會時，以紅點提醒可新增中獎資料。
+            width: 10,
+            height: 10,
+            borderRadius: '50%',
+            minWidth: 10,
+            boxShadow: '0 0 0 2px rgba(255,255,255,0.95)',
+            top: 2,
+            right: 2,
+            transform: 'translate(50%, -50%)',
+            zIndex: 1,
+          },
         }}
       >
-        ＋ 新增中獎
-      </Fab>
+        <Fab
+          variant="extended"
+          color="primary"
+          aria-label="新增中獎"
+          onClick={() => setWalletPickerOpen(true)}
+          sx={{
+            ...IOS_FAB_SX,
+          }}
+        >
+          ＋ 新增中獎
+        </Fab>
+      </Badge>
+
+      {showScrollHint && !dialogOpen && !walletPickerOpen && !planDialogOpen && !undoDialogOpen && (
+        <Box
+          sx={{
+            position: 'fixed',
+            left: '50%',
+            bottom: { xs: 16, sm: 18 },
+            transform: 'translateX(-50%)',
+            zIndex: 1200,
+            px: 1.25,
+            py: 0.35,
+            borderRadius: 999,
+            bgcolor: 'rgba(17,24,39,0.72)',
+            color: '#fff',
+            fontSize: 12,
+            lineHeight: 1,
+            pointerEvents: 'none',
+            '@keyframes scrollHintBounce': {
+              '0%, 100%': { transform: 'translateX(-50%) translateY(0)' },
+              '50%': { transform: 'translateX(-50%) translateY(-5px)' },
+            },
+            animation: 'scrollHintBounce 1.2s ease-in-out infinite',
+          }}
+        >
+          往下還有卡片
+        </Box>
+      )}
 
       <Dialog open={planDialogOpen} onClose={() => setPlanDialogOpen(false)} fullWidth maxWidth="md">
         <DialogTitle>消費計劃（本週未消耗獎券建議）</DialogTitle>
@@ -539,15 +653,15 @@ export function WeeklyPrizeBoardPage() {
       </Dialog>
 
       <Dialog open={walletPickerOpen} onClose={() => setWalletPickerOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>選擇尚未有中獎記錄的支付工具</DialogTitle>
+        <DialogTitle>選擇本週仍可抽獎的支付工具</DialogTitle>
         <DialogContent>
-          {rowsWithoutRecord.length === 0 ? (
+          {rowsWithoutRecordCanAdd.length === 0 ? (
             <Typography color="text.secondary" sx={{ mt: 1 }}>
-              所有支付工具本週已有中獎記錄。
+              所有支付工具本週都已完成抽獎（含未中）。
             </Typography>
           ) : (
             <Box sx={{ mt: 1, display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' } }}>
-              {rowsWithoutRecord.map((row) => (
+              {rowsWithoutRecordCanAdd.map((row) => (
                 <Card
                   key={row.walletId}
                   variant="outlined"
@@ -589,7 +703,7 @@ export function WeeklyPrizeBoardPage() {
             <Box>
               <Typography variant="subtitle2">最多 3 次獎券選擇</Typography>
               <Typography variant="caption" color="text.secondary">
-                已選 {selectedPrizeTimes} / 3（可留空代表未中）
+                已選 {selectedPrizeTimes} / 3（可全部留空，代表三次皆未中）
               </Typography>
             </Box>
             <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 1 }}>
@@ -622,7 +736,10 @@ export function WeeklyPrizeBoardPage() {
           <Button onClick={() => setDialogOpen(false)} disabled={saving}>
             取消
           </Button>
-          <Button variant="contained" onClick={handleSave} disabled={saving || !targetWallet || selectedPrizes.length === 0}>
+          <Button variant="outlined" onClick={() => handleSave([])} disabled={saving || !targetWallet}>
+            沒有中獎
+          </Button>
+          <Button variant="contained" onClick={() => handleSave()} disabled={saving || !targetWallet}>
             {saving ? '儲存中…' : '儲存'}
           </Button>
         </DialogActions>
